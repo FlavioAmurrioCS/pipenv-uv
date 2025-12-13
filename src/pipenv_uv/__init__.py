@@ -1,4 +1,4 @@
-# flake8: noqa: E501
+# flake8: noqa: E501, FBT001, FBT002
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -7,6 +7,9 @@ if TYPE_CHECKING:
     import logging
     import subprocess
     from collections.abc import Iterable
+    from pathlib import Path
+    from subprocess import Popen
+    from typing import Any
     from typing import NamedTuple
 
     from pipenv.patched.pip._vendor.rich.status import Status
@@ -29,6 +32,7 @@ if TYPE_CHECKING:
 
 
 __ORIGINAL_RESOLVE_FUNC__ = None
+__ORIGINAL_PIP_INSTALL_DEPS_FUNC__ = None
 
 
 def get_logger() -> logging.Logger:
@@ -101,7 +105,7 @@ def parse_requirements_lines(f: Iterable[str]) -> tuple[dict[str, PipenvPackage]
             name, _, version = package.partition("==")
             extras = ""
             if "[" in name:
-                name, extras = line.strip("]").split("[", maxsplit=1)
+                name, extras = name.strip("]").split("[", maxsplit=1)
             pkg = {
                 "hashes": hashes,
                 "version": f"=={version}",
@@ -137,14 +141,15 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
     with open(constraints_file) as f:
         for line in f:
             left, right = line.split(", ", maxsplit=1)
-            constraints[left] = right.strip()
+            # NOTE: When using different sources, we need to strip the index URL
+            constraints[left] = right.strip().split(" -i ", maxsplit=1)[0].strip()
     if not constraints:
         logger.warning("No constraints found, running original function")
         return __ORIGINAL_RESOLVE_FUNC__(cmd, st, project)
 
     import os
 
-    if "VERBOSE_PIPENV_UV_PATCH" in os.environ:
+    if "PIPENV_UV_VERBOSE" in os.environ:
         data = {
             "constraints": constraints,
             "cmd": cmd,
@@ -184,8 +189,8 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
         # "--emit-index-annotation",  # Include comment annotations indicating the index used to resolve each package (e.g., `# from https://pypi.org/simple`)
         "-",
     ]
-    if "VERBOSE_PIPENV_UV_PATCH" in os.environ:
-        logger.info("\nRunning pip compile with command: %s", " ".join(cmd))
+    if "PIPENV_UV_VERBOSE" in os.environ:
+        logger.info("\nRunning command: %s", " ".join(cmd))
     import subprocess
 
     st.console.print("Pipenv is being enhanced with uv!")
@@ -207,19 +212,110 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
     return result
 
 
+def subprocess_run(  # noqa: PLR0913
+    args: list[str],
+    *,
+    block: bool = True,
+    text: bool = True,
+    capture_output: bool = True,
+    encoding: str = "utf-8",
+    env: dict[str, str] | None = None,
+    **other_kwargs: Any,  # noqa: ANN401
+) -> Popen[str]:
+    if block:
+        msg = "This patch only supports blocking subprocess.run calls"
+        raise ValueError(msg)
+    import os
+    import subprocess
+
+    _env = os.environ.copy()
+    _env["PYTHONIOENCODING"] = encoding
+    if env:
+        # Ensure all environment variables are strings
+        string_env = {k: str(v) for k, v in env.items() if v is not None}
+        _env.update(string_env)
+    other_kwargs["env"] = _env
+    if capture_output:
+        other_kwargs["stdout"] = subprocess.PIPE
+        other_kwargs["stderr"] = subprocess.PIPE
+
+    python, _file, _install, *rest = args
+    from uv._find_uv import find_uv_bin
+
+    rest.remove("--no-input")
+
+    args = [
+        find_uv_bin(),
+        "pip",
+        "install",
+        f"--python={python}",
+        f"--prefix={os.path.dirname(os.path.dirname(python))}",
+        *rest,
+    ]
+
+    import sys
+
+    print("Install go brrr with uv!", file=sys.stderr)
+    if "PIPENV_UV_VERBOSE" in os.environ:
+        get_logger().info("\nRunning command: %s", " ".join(args))
+
+    return subprocess.Popen(args, universal_newlines=text, encoding=encoding, **other_kwargs)  # noqa: S603
+
+
+def pip_install_deps(  # noqa: PLR0913
+    project: Project,
+    deps: list[str],
+    sources: list[_PipfileLockSource],
+    allow_global: bool = False,
+    ignore_hashes: bool = False,
+    no_deps: bool = False,
+    requirements_dir: Path | None = None,
+    use_pep517: bool = True,
+    extra_pip_args: list[str] | None = None,
+) -> list[Popen[str]]:
+    if __ORIGINAL_PIP_INSTALL_DEPS_FUNC__ is None:
+        msg = "Original pip_install_deps function is not available"
+        raise RuntimeError(msg)
+    from unittest.mock import patch
+
+    import pipenv.utils.pip
+
+    with patch.object(pipenv.utils.pip, "subprocess_run", subprocess_run):
+        return __ORIGINAL_PIP_INSTALL_DEPS_FUNC__(
+            project=project,
+            deps=deps,
+            sources=sources,
+            allow_global=allow_global,
+            ignore_hashes=ignore_hashes,
+            no_deps=no_deps,
+            requirements_dir=requirements_dir,
+            use_pep517=use_pep517,
+            extra_pip_args=extra_pip_args,
+        )
+
+
 def _patch() -> None:
     global __ORIGINAL_RESOLVE_FUNC__
-    if __ORIGINAL_RESOLVE_FUNC__ is not None:
+    global __ORIGINAL_PIP_INSTALL_DEPS_FUNC__  # noqa: PLW0603
+
+    if __ORIGINAL_RESOLVE_FUNC__ is not None or __ORIGINAL_PIP_INSTALL_DEPS_FUNC__ is not None:
         # Already patched
         return
 
     import os
 
-    if os.getenv("DISABLE_PIPENV_UV_PATCH"):
+    if os.getenv("PIPENV_UV_DISABLE_ALL_PATCHES"):
         return
     import sys
 
     if sys.argv and sys.argv[0] and sys.argv[0].endswith("pipenv"):
         from pipenv.utils import resolver
 
-        __ORIGINAL_RESOLVE_FUNC__, resolver.resolve = resolver.resolve, resolve
+        if not os.getenv("PIPENV_UV_DISABLE_RESOLVE_PATCH"):
+            __ORIGINAL_RESOLVE_FUNC__, resolver.resolve = resolver.resolve, resolve
+
+        if not os.getenv("PIPENV_UV_DISABLE_INSTALL_PATCH"):
+            from pipenv.utils import pip
+
+            __ORIGINAL_PIP_INSTALL_DEPS_FUNC__ = pip.pip_install_deps
+            pip.pip_install_deps = pip_install_deps  # pyrefly: ignore[bad-assignment]
