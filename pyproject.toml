@@ -26,6 +26,8 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
+  "pipenv>=2026.0.2",
+  "uv>=0.9.17",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +44,7 @@ test = [
 types_packages = [
   { include-group = "test" },
   "typing-extensions",
+  "uv-to-pipfile>=0.0.7",
 ]
 types = [
   { include-group = "types_packages" },
@@ -67,7 +70,7 @@ Issues = "https://github.com/FlavioAmurrioCS/pipenv-uv/issues"
 Source = "https://github.com/FlavioAmurrioCS/pipenv-uv"
 
 [project.scripts]
-pipenv-uv = "pipenv_uv.__main__:main"
+pipenv = "pipenv:cli"
 
 ###############################################################################
 # region: hatch
@@ -99,6 +102,13 @@ python = [
   "3.13",
   "3.14",
 ]
+
+[tool.hatch.build.targets.wheel.hooks.autorun]
+dependencies = ["hatch-autorun"]
+code = """
+import pipenv_uv
+pipenv_uv._patch()
+"""
 ###############################################################################
 # endregion: hatch
 ###############################################################################
