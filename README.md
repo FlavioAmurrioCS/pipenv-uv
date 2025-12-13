@@ -14,6 +14,7 @@ Patch pipenv to use uv for lock and sync operations.
   - [Table of Contents](#table-of-contents)
   - [Installation](#installation)
   - [Usage](#usage)
+  - [Environmental Variables](#environmental-variables)
   - [TODO](#todo)
   - [License](#license)
 
@@ -36,14 +37,15 @@ uv tool install pipenv --with pipenv-uv --force-reinstall
 
 Just use pipenv as normal :D
 
-You can disable `uv` by using setting `DISABLE_PIPENV_UV_PATCH` ie
-```bash
-DISABLE_PIPENV_UV_PATCH=1 pipenv lock
-```
+## Environmental Variables
+- `PIPENV_UV_DISABLE_RESOLVE_PATCH` - Disable the patch for the resolve/lock command
+- `PIPENV_UV_DISABLE_INSTALL_PATCH` - Disable the patch for install command
+- `PIPENV_UV_DISABLE_ALL_PATCHES` - Disable all patches
+- `PIPENV_UV_VERBOSE` - Enable verbose output
 
 ## TODO
 - [ ] Handle conflicts for main packages and dev packages
-- [ ] Use uv for sync/install as well
+- [x] Use uv for sync/install as well
 - [ ] Add test
 
 ## License
