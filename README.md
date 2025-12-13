@@ -22,15 +22,21 @@ Patch pipenv to use uv for lock and sync operations.
 
 With pipx:
 
-```shell
+```bash
 pipx install pipenv
 pipx inject pipenv pipenv-uv
 ```
 
 With uv:
 
-```shell
+```bash
 uv tool install pipenv --with pipenv-uv --force-reinstall
+```
+
+Inject directly into pipenv(incase you install pipenv with something like brew):
+
+```bash
+"$(head -n1 "$(which pipenv)" | sed 's|#!||g')" -m pip install pipenv-uv
 ```
 
 ## Usage
