@@ -39,6 +39,7 @@ dev = [
 ]
 test = [
   "pytest",
+  "tomli-w",
   "tomli ; python_version < '3.11'",
 ]
 types_packages = [

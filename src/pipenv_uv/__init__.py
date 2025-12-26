@@ -187,6 +187,9 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
         f"--default-index={default_source['url']}",  # The URL of the default package index
         # *(f"--index={source['url']}" for source in _other_sources), # The URLs to use when resolving dependencies, in addition to the default index
         # "--emit-index-annotation",  # Include comment annotations indicating the index used to resolve each package (e.g., `# from https://pypi.org/simple`)
+        *(
+            () if not parsed.pre else ("--prerelease=allow",)
+        ),  # The strategy to use when considering pre-release versions
         "-",
     ]
     if "PIPENV_UV_VERBOSE" in os.environ:
