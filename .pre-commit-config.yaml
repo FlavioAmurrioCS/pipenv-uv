@@ -11,7 +11,7 @@ ci:
     - uv-test
 repos:
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.9.18
+    rev: 0.9.21
     hooks:
       - id: uv-lock
       - id: uv-export
