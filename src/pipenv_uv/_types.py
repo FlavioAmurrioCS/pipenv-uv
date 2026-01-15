@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         editable: NotRequired[bool]
         extras: NotRequired[list[str]]
         version: str
+        index: NotRequired[str]
 
     _PipfilePackage = str | _PipfilePackageDetailed | _PipfilePackageDetailedFile
 

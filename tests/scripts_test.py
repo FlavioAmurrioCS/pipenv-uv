@@ -63,7 +63,14 @@ def test_lock(tmp_path: Path) -> None:
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     python_bin = sys.executable
     pipfile: Pipfile = {
-        "source": [{"name": "pypi", "url": "https://pypi.org/simple", "verify_ssl": True}],
+        "source": [
+            {"name": "pypi", "url": "https://pypi.org/simple", "verify_ssl": True},
+            {
+                "name": "flavioamurriocsgithub",
+                "url": "https://flavioamurriocs.github.io/pypi/simple/",
+                "verify_ssl": True,
+            },
+        ],
         "packages": {
             "requests": ">=2.0.0",
             "urllib3": "<2.0.0",
@@ -76,6 +83,7 @@ def test_lock(tmp_path: Path) -> None:
                 "file": "./sample-lib",
                 "editable": True,
             },
+            "uv-to-pipfile": {"version": "==0.1.dev1", "index": "flavioamurriocsgithub"},
         },
         "dev-packages": {
             "pytest": ">=6.0.0",
