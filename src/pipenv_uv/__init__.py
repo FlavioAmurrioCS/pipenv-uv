@@ -165,9 +165,6 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
     if not sources:
         msg = "No sources found in Pipfile"
         raise ValueError(msg)
-    if len(sources) > 1:
-        msg = "Multiple sources are not supported"
-        raise ValueError(msg)
     default_source, *_other_sources = sources
 
     from uv._find_uv import find_uv_bin
@@ -185,11 +182,14 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
         "--no-header",  # Exclude the comment header at the top of the generated output file
         "--quiet",  # Use quiet output
         f"--default-index={default_source['url']}",  # The URL of the default package index
-        # *(f"--index={source['url']}" for source in _other_sources), # The URLs to use when resolving dependencies, in addition to the default index
+        *(
+            f"--index={source['url']}" for source in _other_sources
+        ),  # The URLs to use when resolving dependencies, in addition to the default index
         # "--emit-index-annotation",  # Include comment annotations indicating the index used to resolve each package (e.g., `# from https://pypi.org/simple`)
         *(
             () if not parsed.pre else ("--prerelease=allow",)
         ),  # The strategy to use when considering pre-release versions
+        "--index-strategy=unsafe-best-match",
         "-",
     ]
     if "PIPENV_UV_VERBOSE" in os.environ:
@@ -253,6 +253,7 @@ def subprocess_run(  # noqa: PLR0913
         "install",
         f"--python={python}",
         f"--prefix={os.path.dirname(os.path.dirname(python))}",
+        "--index-strategy=unsafe-best-match",
         *rest,
     ]
 
