@@ -137,6 +137,13 @@ def test_lock(tmp_path: Path) -> None:
 
     assert original_lock_data != new_lock_data  # they should not be identical as uv has less hashes
     assert original_lock_data["_meta"] == new_lock_data["_meta"]
+
+    # Universal flags adds colorama which pipenv does not unless it has been locked on a windows
+    original_lock_data["default"].pop("colorama", None)
+    original_lock_data["develop"].pop("colorama", None)
+    new_lock_data["default"].pop("colorama", None)
+    new_lock_data["develop"].pop("colorama", None)
+
     assert len(original_lock_data["default"]) == len(new_lock_data["default"])
     assert len(original_lock_data["develop"]) == len(new_lock_data["develop"])
     assert original_lock_data["default"].keys() == new_lock_data["default"].keys()
