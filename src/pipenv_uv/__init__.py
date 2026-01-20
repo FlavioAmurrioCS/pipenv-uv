@@ -64,7 +64,6 @@ def parse_requirements_lines(f: Iterable[str]) -> tuple[dict[str, PipenvPackage]
             continue
 
         hashes.sort()
-        hashes = []
 
         package, _, markers = line.partition(";")
         package = package.strip()
@@ -106,6 +105,8 @@ def parse_requirements_lines(f: Iterable[str]) -> tuple[dict[str, PipenvPackage]
             extras = ""
             if "[" in name:
                 name, extras = name.strip("]").split("[", maxsplit=1)
+            if name not in ret:
+                hashes = []
             pkg = {
                 "hashes": hashes,
                 "version": f"=={version}",
@@ -115,7 +116,10 @@ def parse_requirements_lines(f: Iterable[str]) -> tuple[dict[str, PipenvPackage]
             pkg["markers"] = markers
         if extras:
             pkg["extras"] = extras.split(",")
-        ret[name] = pkg
+        if name in ret:
+            ret[name].pop("markers", None)
+        else:
+            ret[name] = pkg
     return ret, _index
 
 
@@ -183,13 +187,14 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
         "--quiet",  # Use quiet output
         f"--default-index={default_source['url']}",  # The URL of the default package index
         *(
-            f"--index={source['url']}" for source in _other_sources
+            f"--index={source['url']}" for source in sources
         ),  # The URLs to use when resolving dependencies, in addition to the default index
         # "--emit-index-annotation",  # Include comment annotations indicating the index used to resolve each package (e.g., `# from https://pypi.org/simple`)
         *(
             () if not parsed.pre else ("--prerelease=allow",)
         ),  # The strategy to use when considering pre-release versions
         "--index-strategy=unsafe-best-match",
+        "--universal",
         "-",
     ]
     if "PIPENV_UV_VERBOSE" in os.environ:
