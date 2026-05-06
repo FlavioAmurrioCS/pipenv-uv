@@ -194,7 +194,7 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
             () if not parsed.pre else ("--prerelease=allow",)
         ),  # The strategy to use when considering pre-release versions
         "--index-strategy=unsafe-best-match",
-        "--universal",
+        *(("--universal",) if os.getenv("PIPENV_UV_UNIVERSAL") == "1" else ()),
         "-",
     ]
     if "PIPENV_UV_VERBOSE" in os.environ:
