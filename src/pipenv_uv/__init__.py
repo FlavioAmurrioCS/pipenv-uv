@@ -271,7 +271,7 @@ def subprocess_run(  # noqa: PLR0913
     return subprocess.Popen(args, universal_newlines=text, encoding=encoding, **other_kwargs)  # noqa: S603
 
 
-def pip_install_deps(  # noqa: PLR0913
+def pip_install_deps(  # noqa: PLR0913,PLR0917
     project: Project,
     deps: list[str],
     sources: list[_PipfileLockSource],
