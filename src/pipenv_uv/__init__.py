@@ -5,33 +5,21 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import logging
-    import subprocess
     from collections.abc import Iterable
+    from collections.abc import Sequence
     from pathlib import Path
     from subprocess import Popen
     from typing import Any
-    from typing import NamedTuple
 
     from pipenv.patched.pip._vendor.rich.status import Status
     from pipenv.project import Project
+    from pipenv.resolver.schema import LockedRequirement
+    from pipenv.resolver.schema import ResolverRequest
     from uv_to_pipfile.uv_to_pipfile2 import PipenvPackage
     from uv_to_pipfile.uv_to_pipfile2 import _PipfileLockSource
 
-    class ResolverArgs(NamedTuple):
-        pre: bool
-        clear: bool
-        verbose: int
-        category: str | None
-        system: bool
-        parse_only: bool
-        pipenv_site: str | None
-        requirements_dir: str | None
-        write: str | None
-        constraints_file: str | None
-        packages: list[str]
 
-
-__ORIGINAL_RESOLVE_FUNC__ = None
+__ORIGINAL_RUN_RESOLVER_SUBPROCESS__ = None
 __ORIGINAL_PIP_INSTALL_DEPS_FUNC__ = None
 
 
@@ -126,50 +114,69 @@ def parse_requirements_lines(f: Iterable[str]) -> tuple[dict[str, PipenvPackage]
 ###############
 
 
-def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.CompletedProcess[str]:
-    if __ORIGINAL_RESOLVE_FUNC__ is None:
-        msg = "Original resolve function is not available"
+def _run_resolver_subprocess(
+    *,
+    request: ResolverRequest,
+    python_executable: str,
+    project: Project,
+    st: Status,
+) -> Sequence[LockedRequirement]:
+    """Resolve ``request`` with ``uv pip compile`` instead of pipenv's pip resolver.
+
+    Stands in for :func:`pipenv.utils.resolver._run_resolver_subprocess`, which normally
+    serializes the request to a JSON file, spawns ``pipenv/resolver/main.py`` under the
+    target interpreter, and parses the typed response envelope back out. We skip that
+    whole round-trip: the ``ResolverRequest`` already carries everything uv needs, and
+    the caller only wants ``Sequence[LockedRequirement]`` back.
+
+    Anything we cannot handle falls back to the original implementation, so pipenv keeps
+    ownership of genuine resolution failures and their error reporting.
+    """
+    if __ORIGINAL_RUN_RESOLVER_SUBPROCESS__ is None:
+        msg = "Original _run_resolver_subprocess function is not available"
         raise RuntimeError(msg)
-    from pipenv.resolver import get_parser
 
-    parsed: ResolverArgs
-    parsed, _remaining = get_parser().parse_known_args(cmd[2:])  # pyright: ignore[reportAssignmentType] # pyrefly: ignore[bad-assignment]
-    constraints_file = parsed.constraints_file
-    write = parsed.write or "/dev/stdout"
+    import functools
+
+    fallback = functools.partial(
+        __ORIGINAL_RUN_RESOLVER_SUBPROCESS__,
+        request=request,
+        python_executable=python_executable,
+        project=project,
+        st=st,
+    )
     logger = get_logger()
-    if not constraints_file:
-        logger.warning("No constraints file provided, running original function")
-        return __ORIGINAL_RESOLVE_FUNC__(cmd, st, project)
 
-    constraints: dict[str, str] = {}
-    with open(constraints_file) as f:
-        for line in f:
-            left, right = line.split(", ", maxsplit=1)
-            # NOTE: When using different sources, we need to strip the index URL
-            constraints[left] = right.strip().split(" -i ", maxsplit=1)[0].strip()
+    # NOTE: When using different sources, we need to strip the index URL
+    constraints = [
+        spec.split(" -i ", maxsplit=1)[0].strip()
+        for spec in request.packages.specs.values()
+        if spec and spec.strip()
+    ]
     if not constraints:
         logger.warning("No constraints found, running original function")
-        return __ORIGINAL_RESOLVE_FUNC__(cmd, st, project)
+        return fallback()
+
+    # NOTE: We could support multiple sources, but we don't need to for now
+    # This would require use to parse index annotations.
+    sources = request.sources
+    if not sources:
+        logger.warning("No sources found in the request, running original function")
+        return fallback()
+    default_source, *_other_sources = sources
 
     import os
 
     if "PIPENV_UV_VERBOSE" in os.environ:
-        data = {
-            "constraints": constraints,
-            "cmd": cmd,
-            "project": vars(project),
-        }
         import json
 
+        data = {
+            "constraints": constraints,
+            "sources": sources,
+            "options": request.options,
+            "python_executable": python_executable,
+        }
         logger.info("\nRunning pip compile with data: %s", json.dumps(data, default=str, indent=2))
-
-    # NOTE: We could support multiple sources, but we don't need to for now
-    # This would require use to parse index annotations.
-    sources: list[_PipfileLockSource] = project.pipfile_sources()  # pyright: ignore[reportAssignmentType] # pyrefly: ignore[bad-assignment]
-    if not sources:
-        msg = "No sources found in Pipfile"
-        raise ValueError(msg)
-    default_source, *_other_sources = sources
 
     from uv._find_uv import find_uv_bin
 
@@ -177,7 +184,7 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
         find_uv_bin(),
         "pip",
         "compile",
-        f"--python={project.python(parsed.system)}",
+        f"--python={python_executable}",
         "--format=requirements.txt",  # The format in which the resolution should be output
         "--generate-hashes",  # Include distribution hashes in the output file
         "--no-strip-extras",  # Include extras in the output file
@@ -185,13 +192,13 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
         "--no-annotate",  # Exclude comment annotations indicating the source of each package
         "--no-header",  # Exclude the comment header at the top of the generated output file
         "--quiet",  # Use quiet output
-        f"--default-index={default_source['url']}",  # The URL of the default package index
+        f"--default-index={default_source.url}",  # The URL of the default package index
         *(
-            f"--index={source['url']}" for source in sources
+            f"--index={source.url}" for source in sources
         ),  # The URLs to use when resolving dependencies, in addition to the default index
         # "--emit-index-annotation",  # Include comment annotations indicating the index used to resolve each package (e.g., `# from https://pypi.org/simple`)
         *(
-            () if not parsed.pre else ("--prerelease=allow",)
+            () if not request.options.pre else ("--prerelease=allow",)
         ),  # The strategy to use when considering pre-release versions
         "--index-strategy=unsafe-best-match",
         "--universal",
@@ -203,21 +210,28 @@ def resolve(cmd: list[str], st: Status, project: Project) -> subprocess.Complete
 
     st.console.print("Pipenv is being enhanced with uv!")
     result = subprocess.run(  # noqa: S603
-        cmd, input="\n".join(constraints.values()), text=True, capture_output=True, check=False
+        cmd, input="\n".join(constraints), text=True, capture_output=True, check=False
     )
     if result.returncode != 0:
         logger.error("uv pip compile failed with return code %d", result.returncode)
         logger.error("uv pip compile failed with output: %s", result.stdout)
         logger.error("uv pip compile failed with error: %s", result.stderr)
         logger.error("Falling back to original function")
-        return __ORIGINAL_RESOLVE_FUNC__(cmd, st, project)
+        return fallback()
 
     packages, _index = parse_requirements_lines(result.stdout.splitlines())
-    with open(write, "w") as f:
-        import json
 
-        f.write(json.dumps([{"name": k, **v} for k, v in packages.items()]))
-    return result
+    from pipenv.resolver.schema import LockedRequirement as _LockedRequirement
+
+    locked: list[LockedRequirement] = []
+    for name, pkg in packages.items():
+        try:
+            locked.append(_LockedRequirement.from_lockfile_dict({"name": name, **pkg}))
+        except (KeyError, ValueError):  # noqa: PERF203
+            # Every entry needs at least one of version/vcs/file/path; anything else is
+            # constraint noise that the lockfile writer would discard regardless.
+            logger.warning("Skipping malformed resolved entry for %s: %s", name, pkg)
+    return locked
 
 
 def subprocess_run(  # noqa: PLR0913
@@ -304,10 +318,13 @@ def pip_install_deps(  # noqa: PLR0913,PLR0917
 
 
 def _patch() -> None:
-    global __ORIGINAL_RESOLVE_FUNC__
+    global __ORIGINAL_RUN_RESOLVER_SUBPROCESS__  # noqa: PLW0603
     global __ORIGINAL_PIP_INSTALL_DEPS_FUNC__  # noqa: PLW0603
 
-    if __ORIGINAL_RESOLVE_FUNC__ is not None or __ORIGINAL_PIP_INSTALL_DEPS_FUNC__ is not None:
+    if (
+        __ORIGINAL_RUN_RESOLVER_SUBPROCESS__ is not None
+        or __ORIGINAL_PIP_INSTALL_DEPS_FUNC__ is not None
+    ):
         # Already patched
         return
 
@@ -321,7 +338,8 @@ def _patch() -> None:
         from pipenv.utils import resolver
 
         if not os.getenv("PIPENV_UV_DISABLE_RESOLVE_PATCH"):
-            __ORIGINAL_RESOLVE_FUNC__, resolver.resolve = resolver.resolve, resolve
+            __ORIGINAL_RUN_RESOLVER_SUBPROCESS__ = resolver._run_resolver_subprocess  # noqa: SLF001
+            resolver._run_resolver_subprocess = _run_resolver_subprocess  # noqa: SLF001
 
         if not os.getenv("PIPENV_UV_DISABLE_INSTALL_PATCH"):
             from pipenv.utils import pip
