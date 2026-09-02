@@ -16,7 +16,7 @@ repos:
       - id: uv-lock
       - id: uv-export
   - repo: https://github.com/ComPWA/mirrors-taplo
-    rev: "v0.9.3"
+    rev: v0.9.3
     hooks:
       - id: taplo-format
       - id: taplo-lint
