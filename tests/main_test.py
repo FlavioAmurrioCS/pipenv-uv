@@ -47,6 +47,21 @@ def test_parse_requirements_lines_editable_path(tmp_path: Path) -> None:
     assert packages == {"vishleshan-core": {"editable": True, "file": str(project)}}
 
 
+def test_parse_requirements_lines_editable_path_with_markers(tmp_path: Path) -> None:
+    """Environment markers are not included in an editable dep's file value."""
+    project = _local_project(tmp_path, "almacenamiento", "almacenamiento-cliente")
+
+    packages, _index = parse_requirements_lines([f"-e {project} ; python_version >= '3.9'"])
+
+    assert packages == {
+        "almacenamiento-cliente": {
+            "editable": True,
+            "file": str(project),
+            "markers": "python_version >= '3.9'",
+        }
+    }
+
+
 def test_parse_requirements_lines_pinned_version() -> None:
     """A regular pinned package is unaffected."""
     packages, _index = parse_requirements_lines(["idna==3.10"])

@@ -92,7 +92,7 @@ def parse_requirements_lines(f: Iterable[str]) -> tuple[dict[str, PipenvPackage]
             # which would otherwise be keyed by the path itself and fail to install. PipenvPackage
             # has no path variant, hence the ignore.
             pkg = (
-                {"editable": True, "file": line.split("-e ")[-1]}  # type: ignore[assignment] # pyright: ignore[reportAssignmentType] # pyrefly: ignore[bad-assignment]
+                {"editable": True, "file": target}  # type: ignore[assignment] # pyright: ignore[reportAssignmentType] # pyrefly: ignore[bad-assignment]
                 if editable
                 else {"path": target}
             )
