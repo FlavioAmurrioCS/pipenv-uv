@@ -73,8 +73,10 @@ def parse_requirements_lines(f: Iterable[str]) -> tuple[dict[str, PipenvPackage]
         extras = ""
         name = "NOTHING"
 
-        if package.startswith("-e "):
-            project_dir = os.path.abspath(package.split("-e ")[-1])
+        if package.startswith("-e ") or os.path.isdir(package):
+            editable = package.startswith("-e ")
+            target = package.split("-e ")[-1]
+            project_dir = os.path.abspath(target)
             pyproject_path = os.path.join(project_dir, "pyproject.toml")
             name = os.path.basename(project_dir)
             if os.path.exists(pyproject_path):
@@ -86,10 +88,14 @@ def parse_requirements_lines(f: Iterable[str]) -> tuple[dict[str, PipenvPackage]
                             name = match.group(1)
                             break
 
-            pkg = {
-                "editable": True,
-                "file": line.split("-e ")[-1],
-            }
+            # NOTE: uv emits a non-editable local path dep as a bare path with no `==` version,
+            # which would otherwise be keyed by the path itself and fail to install. PipenvPackage
+            # has no path variant, hence the ignore.
+            pkg = (
+                {"editable": True, "file": target}  # type: ignore[assignment] # pyright: ignore[reportAssignmentType] # pyrefly: ignore[bad-assignment]
+                if editable
+                else {"path": target}
+            )
         elif "git+" in package:
             name, _, git_full = package.partition("@")
             if "[" in name:
